@@ -9,6 +9,7 @@ KOBIS 일별 박스오피스(1년치, 일별 10위권) 자료를 '시간'의 눈
 
 import html
 import pandas as pd
+import plotly.colors as pc
 import plotly.express as px
 import streamlit as st
 
@@ -353,7 +354,7 @@ def divider(hero: bool = False) -> None:
     st.markdown(f'<div class="{css_class}"></div>', unsafe_allow_html=True)
 
 
-def style_figure(fig, height: int, show_legend: bool, legend_top: int):
+def style_figure(fig, height: int, show_legend: bool, legend_top: int, hovermode: str):
     """플롯리 그래프를 이 화면의 톤에 맞춥니다. 배경은 투명하게 비워 아래에 깔린
     유리판이 그대로 비치게 하고, 눈금선·글꼴·마우스 쪽지 색만 손봅니다."""
     fig.update_layout(
@@ -362,7 +363,7 @@ def style_figure(fig, height: int, show_legend: bool, legend_top: int):
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
         font=dict(family="Noto Sans KR, sans-serif", size=12, color="#4a5560"),
-        hovermode="x unified",
+        hovermode=hovermode,
         hoverlabel=dict(
             bgcolor="rgba(255,255,255,0.88)",
             bordercolor="rgba(163,168,224,0.5)",
@@ -396,7 +397,13 @@ def style_figure(fig, height: int, show_legend: bool, legend_top: int):
     return fig
 
 
-def show_chart(fig, height: int = 420, show_legend: bool = False, legend_top: int = 28) -> None:
+def show_chart(
+    fig,
+    height: int = 420,
+    show_legend: bool = False,
+    legend_top: int = 28,
+    hovermode: str = "x unified",
+) -> None:
     """유리판을 먼저 깔고 그 위에 그래프를 얹습니다.
     (판은 음수 여백으로 바로 뒤의 그래프를 자기 위로 끌어올립니다.)"""
     st.markdown(
@@ -404,7 +411,7 @@ def show_chart(fig, height: int = 420, show_legend: bool = False, legend_top: in
         unsafe_allow_html=True,
     )
     st.plotly_chart(
-        style_figure(fig, height, show_legend, legend_top),
+        style_figure(fig, height, show_legend, legend_top, hovermode),
         use_container_width=True,
         config={"displayModeBar": False},
     )
@@ -461,12 +468,9 @@ with picker_col:
 
 one = df[df["영화명"] == selected].sort_values("날짜")
 
-fig1 = px.line(one, x="날짜", y="일관객", markers=True)
+fig1 = px.line(one, x="날짜", y="일관객")
 fig1.update_traces(
-    line=dict(color="#7a86d4", width=2.4, shape="spline", smoothing=0.6),
-    marker=dict(size=5, color="#3fa9c9", line=dict(width=1, color="rgba(255,255,255,0.9)")),
-    fill="tozeroy",
-    fillcolor="rgba(122, 134, 212, 0.10)",
+    line=dict(color="#7a86d4", width=2.2),
     hovertemplate="관객수: %{y:,}명<extra></extra>",
 )
 # 날짜는 쪽지 머리말에 한국어로 적고, 눈금도 날짜 형식으로 고정합니다.
@@ -531,12 +535,178 @@ divider()
 
 
 # ────────────────────────────────────────────────────────────────
-# 9. 구역 3 — (다음 그래프 자리)
-#    새 그래프를 넣을 때는 위 구역을 그대로 본떠서 이어 붙이면 됩니다.
-#      section_header(3, "제목", "English label", "한 줄 안내")
-#      fig = px.line(...)  →  show_chart(fig)  →  insight("한 문장")
+# 9. 구역 3 — 날짜별 10위권 일관객 합계(영역 그래프)
+#    영화 한 편이 아니라 '극장가 전체'의 하루 성적을 봅니다.
 # ────────────────────────────────────────────────────────────────
-section_header(3, "다음 그래프 자리", "Coming next")
+section_header(
+    3,
+    "극장가 전체의 하루 관객",
+    "Daily total",
+    "그날 10위권 열 편의 일관객을 모두 더한 값입니다. 합계가 가장 컸던 세 날은 그래프 위에 날짜를 적어 두었습니다.",
+)
+
+# 날짜별로 묶어 그날 10위권 관객을 모두 더합니다.
+daily_total = df.groupby("날짜", as_index=False)["일관객"].sum().rename(columns={"일관객": "합계"})
+# 쪽지에 한글 요일을 함께 적기 위해 미리 뽑아 둡니다.
+# (플롯리의 날짜 형식은 요일을 영어로만 찍기 때문입니다.)
+WEEKDAY_NAMES = ["월", "화", "수", "목", "금", "토", "일"]
+daily_total["요일"] = [WEEKDAY_NAMES[day] for day in daily_total["날짜"].dt.dayofweek]
+# 그중 합계가 가장 컸던 세 날 — 그래프 위에 점과 날짜를 찍어 줍니다.
+busiest = daily_total.nlargest(3, "합계").sort_values("날짜")
+
+fig3 = px.area(daily_total, x="날짜", y="합계", custom_data=["요일"])
+fig3.update_traces(
+    line=dict(color="#7a86d4", width=1.8),
+    fillcolor="rgba(122, 134, 212, 0.18)",
+    hovertemplate="%{customdata[0]}요일 · 합계: %{y:,}명<extra></extra>",
+)
+# 가장 붐빈 세 날 표시 — 황동색 점 위에 날짜를 적습니다.
+# (겹쳐 보이지 않도록 점마다 글자 위치를 조금씩 다르게 둡니다.)
+fig3.add_scatter(
+    x=busiest["날짜"],
+    y=busiest["합계"],
+    mode="markers+text",
+    marker=dict(size=10, color="#c9a04a", line=dict(width=2, color="rgba(255,255,255,0.95)")),
+    text=[f"{day:%Y-%m-%d}" for day in busiest["날짜"]],
+    textposition=["top center", "top left", "top right"][: len(busiest)],
+    textfont=dict(size=11, color="#8a6423"),
+    cliponaxis=False,
+    hoverinfo="skip",  # 합계는 영역 그래프 쪽 쪽지에 이미 나옵니다.
+    showlegend=False,
+)
+fig3.update_xaxes(tickformat="%Y-%m-%d", hoverformat="%Y년 %m월 %d일")
+fig3.update_yaxes(tickformat=",", ticksuffix="명")
+
+show_chart(fig3, height=440, legend_top=44)
+
+insight(
+    f"1년 중 극장이 가장 붐빈 날은 {busiest.loc[busiest['합계'].idxmax(), '날짜']:%Y년 %m월 %d일}이었고, "
+    "성탄절·광복절 연휴처럼 쉬는 날에 관객이 몰린다는 것을 볼 수 있습니다."
+)
+
+divider()
+
+
+# ────────────────────────────────────────────────────────────────
+# 10. 구역 4 — 이 기간 관객이 가장 많았던 영화 TOP 10(가로 막대)
+# ────────────────────────────────────────────────────────────────
+section_header(
+    4,
+    "이 기간 관객이 가장 많았던 영화 10편",
+    "Top 10 total",
+    "영화별로 이 기간의 일관객을 모두 더한 값입니다. 막대에 마우스를 올리면 10위권에 든 날수도 함께 보입니다.",
+)
+
+# 영화별로 관객 합계와, 10위권에 이름을 올린 날수를 함께 구합니다.
+by_movie = (
+    df.groupby("영화명")
+    .agg(합계=("일관객", "sum"), 날수=("날짜", "nunique"))
+    .sort_values("합계", ascending=False)
+    .head(10)
+    # 가로 막대는 아래에서 위로 쌓이므로, 관객이 많은 영화가 맨 위에 오도록
+    # 오름차순으로 뒤집어 둡니다.
+    .sort_values("합계")
+    .reset_index()
+)
+
+# 막대 색은 청록에서 분홍까지 이어지는 이 화면의 색 띠에서 10칸을 뽑아 씁니다.
+bar_colors = pc.sample_colorscale(PALETTE[:4], [i / 9 for i in range(10)])
+
+fig4 = px.bar(
+    by_movie,
+    x="합계",
+    y="영화명",
+    orientation="h",
+    text="합계",
+    custom_data=["날수"],
+)
+fig4.update_traces(
+    marker=dict(color=bar_colors, line=dict(width=1, color="rgba(255,255,255,0.9)")),
+    texttemplate="%{x:,}",
+    textposition="outside",
+    textfont=dict(size=11, color="#6a7481"),
+    cliponaxis=False,
+    hovertemplate="관객 합계: %{x:,}명<br>10위권에 든 날: %{customdata[0]:,}일<extra></extra>",
+)
+fig4.update_xaxes(tickformat=",", ticksuffix="명")
+fig4.update_yaxes(showgrid=False)
+
+show_chart(fig4, height=480, hovermode="closest")
+
+top_movie = by_movie.iloc[-1]
+insight(
+    f"이 기간 관객이 가장 많았던 영화는 '{top_movie['영화명']}'({top_movie['합계']:,}명)이며, "
+    "막대 길이와 10위권에 머문 날수를 견주면 '짧고 굵게' 흥행한 영화와 '길게 버틴' 영화가 갈립니다."
+)
+
+divider()
+
+
+# ────────────────────────────────────────────────────────────────
+# 11. 구역 5 — 월 × 요일 일관객 합계(히트맵)
+#     같은 사실(주말에 관객이 몰린다)이 선 그래프와는 다른 모습으로 나타납니다.
+# ────────────────────────────────────────────────────────────────
+section_header(
+    5,
+    "월 × 요일로 본 관객 쏠림",
+    "Month x weekday",
+    "날짜에서 월과 요일을 뽑아 일관객을 모두 더했습니다. 색이 진할수록 관객이 많습니다."
+    " (자료가 2025년 9월~2026년 9월이라 9월만 두 해가 겹칩니다.)",
+)
+
+calendar = df.assign(월=df["날짜"].dt.month, 요일=df["날짜"].dt.dayofweek)
+# 세로는 1월~12월, 가로는 월요일~일요일 순서로 놓습니다.
+pivot = (
+    calendar.groupby(["월", "요일"])["일관객"]
+    .sum()
+    .unstack()
+    .reindex(index=range(1, 13), columns=range(7))
+    .fillna(0)
+)
+pivot.index = [f"{month}월" for month in pivot.index]
+pivot.columns = WEEKDAY_NAMES
+
+fig5 = px.imshow(
+    pivot,
+    aspect="auto",
+    # 옅은 하늘빛에서 짙은 보랏빛으로 — 진할수록 관객이 많다는 뜻입니다.
+    color_continuous_scale=["#f2f7fb", "#cfe6f0", "#93c4dd", "#7a86d4", "#4b3f8f"],
+)
+fig5.update_traces(
+    hovertemplate="%{y} %{x}요일<br>일관객 합계: %{z:,}명<extra></extra>",
+    xgap=3,
+    ygap=3,
+)
+fig5.update_xaxes(side="top", showgrid=False, tickfont=dict(size=12, color="#4a5560"))
+fig5.update_yaxes(showgrid=False, autorange="reversed")
+fig5.update_coloraxes(
+    colorbar=dict(
+        title=dict(text="관객 합계", font=dict(size=11, color="#7b86c4")),
+        tickformat=",",
+        ticksuffix="명",
+        tickfont=dict(size=10, color="#8994a1"),
+        outlinewidth=0,
+        thickness=12,
+    )
+)
+
+show_chart(fig5, height=520, legend_top=44, hovermode="closest")
+
+insight(
+    "토요일과 일요일 칸이 세로로 길게 진해집니다 — 선 그래프에서 톱니처럼 보이던 주말 효과가, "
+    "1년치를 요일로 접으면 색의 기둥으로 다시 나타납니다."
+)
+
+divider()
+
+
+# ────────────────────────────────────────────────────────────────
+# 12. 구역 6 — (다음 그래프 자리)
+#     새 그래프를 넣을 때는 위 구역을 그대로 본떠서 이어 붙이면 됩니다.
+#       section_header(6, "제목", "English label", "한 줄 안내")
+#       fig = px.line(...)  →  show_chart(fig)  →  insight("한 문장")
+# ────────────────────────────────────────────────────────────────
+section_header(6, "다음 그래프 자리", "Coming next")
 st.markdown(
     '<div class="slot-empty scroll-reveal">이 자리에 다음 그래프가 들어옵니다</div>',
     unsafe_allow_html=True,
